@@ -12,12 +12,17 @@ class ReceiptRenderError(Exception):
     pass
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 async def render_receipt_block(shop_key: str, url: str, timeout_ms: int = 60000) -> bytes:
     """
     Открывает страницу квитанции по URL, принудительно заполняет поля
-    через Playwright и делает скриншот ТОЛЬКО нужного блока, используя
-    скролл до элемента для избежания обрезки.
+    через Playwright и делает скриншот ТОЛЬКО нужного блока.
     """
+    logger.info(f"[{shop_key}] Начинаем рендер URL: {url}")
+    
     layout = RECEIPT_LAYOUTS.get(shop_key)
     if not layout:
         raise ReceiptRenderError(f"Неизвестный макет: {shop_key}")
@@ -44,6 +49,7 @@ async def render_receipt_block(shop_key: str, url: str, timeout_ms: int = 60000)
     full_address = ", ".join(addr_parts)
     
     # --- Запуск Playwright ---
+    logger.info(f"[{shop_key}] Запуск браузера...")
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, timeout=timeout_ms)
         try:
@@ -55,74 +61,69 @@ async def render_receipt_block(shop_key: str, url: str, timeout_ms: int = 60000)
             page.set_default_timeout(timeout_ms)
 
             # Открываем страницу
+            logger.info(f"[{shop_key}] Переход на страницу...")
             await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            logger.info(f"[{shop_key}] Страница открыта.")
             
             # 1. СИНХРОНИЗАЦИЯ И ОБНОВЛЕНИЕ ДАННЫХ
             
             if shop_key == "bestbuy":
+                logger.info(f"[{shop_key}] Заполнение полей BestBuy...")
                 update_button_selector = "#updateAllButton"
                 
                 # Ждем появления формы
                 await page.wait_for_selector(update_button_selector, state="visible", timeout=10000)
 
                 # ПРЯМОЕ ЗАПОЛНЕНИЕ ПОЛЕЙ И КЛИК (логика BestBuy)
-                
-                # Заполнение SELECT и вызов события 'change'
                 if query_params.get("product"):
                     await page.select_option("#productSelect", value=query_params.get("product"))
                     await page.evaluate("document.getElementById('productSelect').dispatchEvent(new Event('change', {bubbles: true}))")
 
-                # Заполнение DATE и вызов события 'change'
                 if query_params.get("date"):
                     await page.fill("#dateInput", query_params.get("date"))
                     await page.evaluate("document.getElementById('dateInput').dispatchEvent(new Event('change', {bubbles: true}))")
 
-                # Заполнение NAME и вызов события 'input'
                 if query_params.get("name"):
                     await page.fill("#nameInput", query_params.get("name"))
                     await page.evaluate("document.getElementById('nameInput').dispatchEvent(new Event('input', {bubbles: true}))")
 
-                # Заполнение ADDRESS и вызов события 'input'
                 if full_address:
                     await page.fill("#addressInput", full_address)
                     await page.evaluate("document.getElementById('addressInput').dispatchEvent(new Event('input', {bubbles: true}))")
 
-                # Заполнение STATE и вызов события 'change'
                 if query_params.get("state"):
                     await page.select_option("#stateSelect", value=query_params.get("state"))
                     await page.evaluate("document.getElementById('stateSelect').dispatchEvent(new Event('change', {bubbles: true}))")
                 
-                # Заполнение SN
                 await page.fill("#serialNumberInput", query_params.get("sn", ""))
                 await page.evaluate("document.getElementById('serialNumberInput').dispatchEvent(new Event('input', {bubbles: true}))")
 
-                # ПРИНУДИТЕЛЬНЫЙ КЛИК ПО КНОПКАМ:
+                logger.info(f"[{shop_key}] Клик 'Update'...")
                 await page.click("#generateOrderNumberButton", timeout=5000)
                 await page.click(update_button_selector, timeout=5000)
 
             elif shop_key == "amazon":
-                # ЛОГИКА AMAZON: Ждем, пока встроенный JS (который ждет 600 мс) завершит работу
-                # Amazon JS запускается на DOMContentLoaded, поэтому просто ждем таймаут
+                logger.info(f"[{shop_key}] Ожидание инициализации Amazon...")
                 await page.wait_for_timeout(1500) 
                 
             else:
-                # Для других магазинов просто ждем
                 await page.wait_for_timeout(3000)
 
-            # 3. ФИНАЛЬНОЕ НАДЕЖНОЕ ОЖИДАНИЕ (для обоих магазинов)
+            # 3. ФИНАЛЬНОЕ НАДЕЖНОЕ ОЖИДАНИЕ
+            logger.info(f"[{shop_key}] Ожидание networkidle...")
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000) 
+            except Exception:
+                logger.warning(f"[{shop_key}] Networkidle timeout ignored.")
             
-            # Ждем, пока сеть не станет бездействовать (после загрузки картинки)
-            await page.wait_for_load_state("networkidle", timeout=10000) # Увеличиваем таймаут
-            
-            # Ждем финального рендеринга (длительная пауза для стабилизации DOM)
+            logger.info(f"[{shop_key}] Финальная пауза 3с...")
             await page.wait_for_timeout(3000)
 
-            # 4. Скриншот ТОЛЬКО блока, с принудительной прокруткой
-            
+            # 4. Скриншот
+            logger.info(f"[{shop_key}] Поиск блока '{selector}'...")
             block = page.locator(selector)
             
-            # Финальное ожидание видимости и стабильности
-            await block.wait_for(state="visible", timeout=5000)
+            await block.wait_for(state="visible", timeout=10000)
             
             count = await block.count()
             if count == 0:
@@ -130,12 +131,17 @@ async def render_receipt_block(shop_key: str, url: str, timeout_ms: int = 60000)
                     f"Блок по селектору '{selector}' не найден на странице {url}"
                 )
             
-            # Принудительно прокручиваем окно, чтобы элемент не обрезался при скриншоте
-            await block.scroll_into_view_if_needed()
-            await page.wait_for_timeout(500) # Короткая пауза для отрисовки после скролла
+            if shop_key == "amazon":
+                # Для Амазона иногда нужно прокрутить, чтобы lazy load картинки подгрузились
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(500)
 
-            # Скриншот блока
+            await block.scroll_into_view_if_needed()
+            await page.wait_for_timeout(500)
+
+            logger.info(f"[{shop_key}] Снятие скриншота...")
             screenshot_bytes = await block.screenshot()
+            logger.info(f"[{shop_key}] Готово!")
 
             return screenshot_bytes
         finally:
