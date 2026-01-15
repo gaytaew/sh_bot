@@ -115,16 +115,25 @@ class AccountService:
 
         raise RuntimeError("Нет свободных email-ов в листе 'Emails'. Добавь новые Email / очисти USED.")
     
-    def generate_random_date_str(self) -> str:
+    def generate_random_date_str(self, product_name: str | None = None) -> str:
         """
-        Генерирует случайную дату в диапазоне от 4 до 9 месяцев НАЗАД от текущей даты.
-        Возвращает строку в формате DD.MM.YYYY.
+        Генерирует случайную дату покупки.
+        Для Cefaly: не позднее, чем за 1 год и 1 месяц (т.е. старее 13 месяцев).
+        Для остальных: 4-9 месяцев назад.
         """
         now = datetime.now()
         
-        min_days_back = 4 * 30.4375
-        max_days_back = 9 * 30.4375
+        # По умолчанию (Shokz и др): 4-9 месяцев назад
+        min_days_back = 4 * 30.5
+        max_days_back = 9 * 30.5
         
+        if product_name and product_name.lower() == "cefaly":
+            # "Не позднее, чем за 1 год и 1 месяц" -> старее (дальше в прошлое), чем 13 месяцев
+            # 1 год 1 месяц = ~395 дней
+            # Сделаем диапазон от 13 до 18 месяцев (чтобы не улететь в "слишком старое")
+            min_days_back = 395  # 13 месяцев
+            max_days_back = 545  # ~18 месяцев
+
         random_days = random.randint(int(min_days_back), int(max_days_back))
         
         random_date = now - timedelta(days=random_days)
@@ -175,7 +184,7 @@ class AccountService:
             else:
                 issue = random.choice(ISSUE_TEMPLATES)
         
-        date_receipt = self.generate_random_date_str()  # Дата для квитанции (в прошлом)
+        date_receipt = self.generate_random_date_str(product)  # Дата с учетом товара
         date_gs_current = datetime.now().strftime("%d.%m.%Y")  # ТЕКУЩАЯ ДАТА ЗАКАЗА
         
         min_len = COL_RECEIPT_LINK 
