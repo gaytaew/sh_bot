@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./config.py:/app/config.py
+    # If you have other persistent data (like logs or a local DB), add volumes here.
