@@ -14,7 +14,9 @@ from bot.keyboards import (
 from services.google_sheets import get_sheets_service
 from services.accounts import get_account_service
 from services.receipts import get_receipt_service
+from receipt_renderer import render_receipt_block
 from models import ReceiptData
+from aiogram.types import BufferedInputFile
 
 router = Router()
 
@@ -170,6 +172,40 @@ async def handle_product_select(call: types.CallbackQuery):
     )
 
     await call.message.answer(text_resp, reply_markup=status_keyboard(account_data.row_idx))
+    
+    # 6. АВТОМАТИЧЕСКИЙ СКРИНШОТ (Generate Screenshot)
+    # Пытаемся сделать скриншот Amazon, если ссылка есть
+    screenshot_url = ""
+    screenshot_shop = ""
+    
+    # Приоритет: Amazon -> BestBuy -> Первая попавшаяся
+    if "amazon" in links_text.lower() and "amazon" in [k for k in shop_emojis if k in links_text.lower()]:
+         # Ищем URL амазона - но у нас нет чистого словаря URLов здесь, мы собрали текст.
+         # Лучше пересобрать словарь или сохранить его.
+         pass
+
+    # Чтобы не парсить текст, используем сохраненные данные.
+    # Мы генерировали URL выше, но не сохранили словарь. Давайте повторим логику аккуратно.
+    # Но лучше всего сделать скриншот той ссылки, которая ушла в GS (final_url) и соответствующего магазина (shop_key_for_gs)
+    
+    if final_url and 'shop_key_for_gs' in locals():
+        loading_msg = await call.message.answer("📸 Генерирую скриншот чека... (это займет 5-10 сек)")
+        try:
+            # Делаем скриншот
+            image_bytes = await render_receipt_block(shop_key_for_gs, final_url)
+            
+            photo_file = BufferedInputFile(image_bytes, filename=f"receipt_{account_data.order_no}.png")
+            
+            await call.message.answer_photo(
+                photo=photo_file, 
+                caption=f"🧾 Скриншот квитанции ({shop_key_for_gs.capitalize()})"
+            )
+        except Exception as e:
+            logger.error(f"Скриншот не удался: {e}")
+            await call.message.answer(f"⚠️ Не удалось сделать скриншот: {e}")
+        finally:
+            await loading_msg.delete()
+
     await call.message.answer("Что дальше?", reply_markup=start_keyboard())
     await call.answer()
 
