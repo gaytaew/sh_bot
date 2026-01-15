@@ -15,7 +15,7 @@ from services.google_sheets import get_sheets_service
 from services.accounts import get_account_service
 from services.receipts import get_receipt_service
 from receipt_renderer import render_receipt_block
-from models import ReceiptData
+from models import ReceiptData, AddressParts
 from aiogram.types import BufferedInputFile
 
 router = Router()
