@@ -65,4 +65,7 @@ PRODUCT_ID_MAP = {
     "Oura Ring Silver 8": "OU005",
 
     "Remarkable Paper Pro": "RM001",
+
+    # ---- Cefaly ----
+    "Cefaly": "CF001",
 }
