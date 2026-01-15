@@ -135,12 +135,18 @@ async def handle_product_select(call: types.CallbackQuery):
         "bestbuy": "🛒",
     }
     
+    generated_urls = {} # Сохраняем все успешные ссылки
+    
     for key in ["amazon", "bestbuy"]:
         try:
             url = receipt_service.build_receipt_url(key, receipt_data)
             emoji = shop_emojis.get(key, "🔗")
             links_text += f"\n{emoji} *{key.capitalize()}*:\n<code>{url}</code>\n"
-            # Сохраняем первую успешную ссылку (Amazon по умолчанию)
+            
+            # Сохраняем ссылку для скриншотов
+            generated_urls[key] = url
+            
+            # Сохраняем первую успешную ссылку (для Google Sheets)
             if not final_url:
                  final_url = url
                  shop_key_for_gs = key
@@ -173,36 +179,28 @@ async def handle_product_select(call: types.CallbackQuery):
 
     await call.message.answer(text_resp, reply_markup=status_keyboard(account_data.row_idx))
     
-    # 6. АВТОМАТИЧЕСКИЙ СКРИНШОТ (Generate Screenshot)
-    # Пытаемся сделать скриншот Amazon, если ссылка есть
-    screenshot_url = ""
-    screenshot_shop = ""
-    
-    # Приоритет: Amazon -> BestBuy -> Первая попавшаяся
-    if "amazon" in links_text.lower() and "amazon" in [k for k in shop_emojis if k in links_text.lower()]:
-         # Ищем URL амазона - но у нас нет чистого словаря URLов здесь, мы собрали текст.
-         # Лучше пересобрать словарь или сохранить его.
-         pass
-
-    # Чтобы не парсить текст, используем сохраненные данные.
-    # Мы генерировали URL выше, но не сохранили словарь. Давайте повторим логику аккуратно.
-    # Но лучше всего сделать скриншот той ссылки, которая ушла в GS (final_url) и соответствующего магазина (shop_key_for_gs)
-    
-    if final_url and 'shop_key_for_gs' in locals():
-        loading_msg = await call.message.answer("📸 Генерирую скриншот чека... (это займет 5-10 сек)")
+    # 6. АВТОМАТИЧЕСКИЕ СКРИНШОТЫ (Generate Screenshots)
+    if generated_urls:
+        loading_msg = await call.message.answer("📸 Генерирую скриншоты чеков... (это займет время)")
+        
         try:
-            # Делаем скриншот
-            image_bytes = await render_receipt_block(shop_key_for_gs, final_url)
-            
-            photo_file = BufferedInputFile(image_bytes, filename=f"receipt_{account_data.order_no}.png")
-            
-            await call.message.answer_photo(
-                photo=photo_file, 
-                caption=f"🧾 Скриншот квитанции ({shop_key_for_gs.capitalize()})"
-            )
+            for shop_key, url in generated_urls.items():
+                try:
+                    # Делаем скриншот
+                    image_bytes = await render_receipt_block(shop_key, url)
+                    
+                    photo_file = BufferedInputFile(image_bytes, filename=f"receipt_{shop_key}_{account_data.order_no}.png")
+                    
+                    await call.message.answer_photo(
+                        photo=photo_file, 
+                        caption=f"🧾 Скриншот квитанции ({shop_key.capitalize()})"
+                    )
+                except Exception as e:
+                    logger.error(f"Скриншот {shop_key} не удался: {e}")
+                    await call.message.answer(f"⚠️ Ошибка скриншота {shop_key}: {e}")
+                    
         except Exception as e:
-            logger.error(f"Скриншот не удался: {e}")
-            await call.message.answer(f"⚠️ Не удалось сделать скриншот: {e}")
+            logger.error(f"Общая ошибка скриншотов: {e}")
         finally:
             await loading_msg.delete()
 
