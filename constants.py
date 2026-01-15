@@ -1,7 +1,7 @@
 """
 Константы и конфигурационные данные для бота Shokz.
 """
-from issues import ISSUE_TEMPLATES
+from issues import ISSUE_TEMPLATES, CEFALY_ISSUE_TEMPLATES
 from receipt_product_map import PRODUCT_ID_MAP
 
 # --- СЛОВАРИ СИНОНИМОВ ДЛЯ АДРЕСА ---

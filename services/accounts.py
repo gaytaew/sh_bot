@@ -19,7 +19,7 @@ from config import (
     COL_ISSUE,
     COL_RECEIPT_LINK,
 )
-from constants import ISSUE_TEMPLATES
+from constants import ISSUE_TEMPLATES, CEFALY_ISSUE_TEMPLATES 
 from models import AccountData, AddressParts
 from services.google_sheets import get_sheets_service
 from services.address import (
@@ -164,7 +164,17 @@ class AccountService:
 
         row_idx = data_rows + 2
 
-        issue = issue_reason or random.choice(ISSUE_TEMPLATES)
+        row_idx = data_rows + 2
+
+        if issue_reason:
+            issue = issue_reason
+        else:
+            # Если товар "Cefaly" (без учета регистра), берем из спец. списка
+            if product.lower() == "cefaly":
+                issue = random.choice(CEFALY_ISSUE_TEMPLATES)
+            else:
+                issue = random.choice(ISSUE_TEMPLATES)
+        
         date_receipt = self.generate_random_date_str()  # Дата для квитанции (в прошлом)
         date_gs_current = datetime.now().strftime("%d.%m.%Y")  # ТЕКУЩАЯ ДАТА ЗАКАЗА
         
