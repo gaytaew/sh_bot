@@ -179,31 +179,75 @@ async def handle_product_select(call: types.CallbackQuery):
 
     await call.message.answer(text_resp, reply_markup=status_keyboard(account_data.row_idx))
     
-    # 6. АВТОМАТИЧЕСКИЕ СКРИНШОТЫ (Generate Screenshots)
-    if generated_urls:
-        loading_msg = await call.message.answer("📸 Генерирую скриншоты чеков... (это займет время)")
-        
-        try:
-            for shop_key, url in generated_urls.items():
-                try:
-                    # Делаем скриншот
-                    image_bytes = await render_receipt_block(shop_key, url)
-                    
-                    photo_file = BufferedInputFile(image_bytes, filename=f"receipt_{shop_key}_{account_data.order_no}.png")
-                    
-                    await call.message.answer_photo(
-                        photo=photo_file, 
-                        caption=f"🧾 Скриншот квитанции ({shop_key.capitalize()})"
-                    )
-                except Exception as e:
-                    logger.error(f"Скриншот {shop_key} не удался: {e}")
-                    await call.message.answer(f"⚠️ Ошибка скриншота {shop_key}: {e}")
-                    
-        except Exception as e:
-            logger.error(f"Общая ошибка скриншотов: {e}")
-        finally:
-            await loading_msg.delete()
-
     await call.message.answer("Что дальше?", reply_markup=start_keyboard())
     await call.answer()
+
+
+@router.callback_query(lambda c: c.data and c.data.startswith("receipt_img:"))
+async def handle_receipt_screenshot(call: types.CallbackQuery):
+    """
+    Обработчик кнопок '📷 Amazon' / '📸 BestBuy'.
+    Генерирует ссылку на основе данных из GS (берутся по row_idx) и делает скриншот.
+    """
+    _, shop_key, row_str = call.data.split(":", 2)
+    row_idx = int(row_str)
+    
+    # 0. Уведомляем Telegram, что мы приняли callback
+    await call.answer("📸 Генерирую чек, ждите...", cache_time=2)
+    
+    loading_msg = await call.message.answer(f"⏳ Генерирую скриншот для {shop_key.capitalize()}...")
+    
+    try:
+        account_service = get_account_service()
+        receipt_service = get_receipt_service()
+        
+        # 1. Получаем данные из Google Sheets
+        data = account_service.get_account_data(row_idx)
+        product_name = data.get("product", "")
+        
+        if not product_name:
+             await loading_msg.edit_text("❌ Ошибка: не удалось прочитать товар из таблицы.")
+             return
+
+        # 2. Генерируем "свежую" дату покупки 
+        # (Используем логику AccountService, чтобы Cefaly был старым)
+        random_date = account_service.generate_random_date_str(product_name)
+        
+        # 3. Собираем объект для квитанции
+        # Т.к. address_parts не хранятся в GS, используем упрощенную модель (весь адрес в addr1)
+        address_parts = AddressParts(
+            addr1=data.get("address", ""),
+            addr2="",
+            city="",
+            state="",
+            zip_code="",
+        )
+        
+        receipt_data = ReceiptData(
+            product_name=product_name,
+            date=random_date,
+            name=data.get("name", ""),
+            address_parts=address_parts,
+        )
+        
+        # 4. Генерируем URL
+        url = receipt_service.build_receipt_url(shop_key, receipt_data)
+        
+        # 5. Делаем скриншот
+        image_bytes = await render_receipt_block(shop_key, url)
+        
+        # 6. Отправляем
+        photo_file = BufferedInputFile(image_bytes, filename=f"receipt_{shop_key}_{row_idx}.png")
+        
+        await loading_msg.delete()  # Удаляем сообщение о загрузке
+        await call.message.answer_photo(
+            photo=photo_file, 
+            caption=f"🧾 Скриншот квитанции ({shop_key.capitalize()})\n🔗 <a href='{url}'>Ссылка</a>"
+        )
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.exception("Ошибка при генерации скриншота по требованию")
+        await loading_msg.edit_text(f"❌ Ошибка: {e}")
 

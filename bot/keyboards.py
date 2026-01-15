@@ -89,6 +89,10 @@ def status_keyboard(row_idx: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🟡 Новый", callback_data=f"status:new:{row_idx}")],
             [InlineKeyboardButton(text="🟠 Оформлен", callback_data=f"status:in_progress:{row_idx}")],
             [InlineKeyboardButton(text="🟢 Одобрен", callback_data=f"status:approved:{row_idx}")],
+            [
+                InlineKeyboardButton(text="📷 Amazon", callback_data=f"receipt_img:amazon:{row_idx}"),
+                InlineKeyboardButton(text="📸 BestBuy", callback_data=f"receipt_img:bestbuy:{row_idx}"),
+            ],
             [InlineKeyboardButton(text="➕ Новый аккаунт", callback_data="mode:categories")],
         ]
     )
