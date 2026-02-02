@@ -50,13 +50,23 @@ class AccountService:
                 continue
             if name.strip().upper().endswith("USED"):
                 continue
+            if name.strip().upper().endswith("MODEL"):
+                continue
             products.append((idx, name.strip()))
         return products
     
-    def get_serial_for_product(self, product_name: str) -> str:
+    def get_serial_for_product(self, product_name: str) -> tuple[str, str | None]:
         """
-        Найти первый свободный серийник для товара и
-        ПЕРЕНЕСТИ его: из основного столбца -> в столбец USED (основной очистить).
+        Найти свободный серийник.
+        Для обычных товаров:
+            Структура: [Serial] [Used]
+            Возвращает: (serial, None)
+            
+        Для Oura Ring:
+            Структура: [Serial] [Model] [Used]
+            Возвращает: (serial, model_info)
+            
+        Действие: Переносит Serial в Used, основной Serial стирает.
         """
         headers = self.sheets.sheet_products.row_values(1)
         try:
@@ -64,33 +74,71 @@ class AccountService:
         except ValueError:
             raise RuntimeError(f"Не найден столбец для товара '{product_name}' в листе 'Товары'.")
 
-        used_col_idx = col_idx + 1
+        # ОПРЕДЕЛЯЕМ СТРУКТУРУ КОЛОНОК
+        is_oura = "oura ring" in product_name.lower()
+        
+        if is_oura:
+            # [Serial] [Model] [Used]
+            model_col_idx = col_idx + 1
+            used_col_idx = col_idx + 2
+        else:
+            # [Serial] [Used]
+            model_col_idx = None
+            used_col_idx = col_idx + 1
 
-        # Читаем данные из листа "Товары", начиная со второй строки (индекс 0 в списках)
+        # Читаем данные
+        # col_vals - это сами серийники
         col_vals = self.sheets.sheet_products.col_values(col_idx)[1:]
+        
+        # used_vals - колонка использованных
         used_vals = self.sheets.sheet_products.col_values(used_col_idx)[1:]
+        
+        # model_vals - колонка моделей (если есть)
+        model_vals = []
+        if model_col_idx:
+            model_vals = self.sheets.sheet_products.col_values(model_col_idx)[1:]
 
-        # i - это фактический номер строки в Google Sheets (начиная с 2)
+        # i - фактический номер строки в Google Sheets (start=2)
         for i, serial in enumerate(col_vals, start=2): 
-            # list_index - индекс в списках col_vals/used_vals (начинается с 0)
             list_index = i - 2
             
             serial = serial.strip()
+            # Проверяем used
             used = used_vals[list_index].strip() if list_index < len(used_vals) else ""
             
             if serial and not used:
-                # Найдена свободная запись в строке i листа Товары
-                row_idx = i 
+                # НАШЛИ СВОБОДНЫЙ
+                row_idx = i
+                
+                # Достаем доп. инфо если надо
+                extra_info = None
+                if is_oura:
+                    extra_info = model_vals[list_index].strip() if list_index < len(model_vals) else ""
+                    if not extra_info:
+                        extra_info = "Unknown Model"
+
+                # ЗАПИСЬ В SHEETS (атомарно, насколько можно)
+                # Очищаем Serial, Пишем в Used
+                # Для Oura: Used колонка смещена на 1
+                
                 main_col_letter = col_to_letter(col_idx)
                 used_col_letter = col_to_letter(used_col_idx)
-                rng = f"{main_col_letter}{row_idx}:{used_col_letter}{row_idx}"
                 
-                # основной столбец очищаем, в USED пишем серийник
-                self.sheets.sheet_products.update(rng, [["", serial]])
-                logger.info(f"Выдан серийник {serial} для товара '{product_name}' (строка {row_idx})")
-                return serial
+                # Формируем range: например O2:Q2 (если 3 колонки)
+                # Но мы обновляем только Serial и Used.
+                # Serial -> ""
+                # Used -> serial
+                # Model (если есть) -> не трогаем
+                
+                # Обновляем ячейку Serial -> ""
+                self.sheets.sheet_products.update_cell(row_idx, col_idx, "")
+                # Обновляем ячейку Used -> serial
+                self.sheets.sheet_products.update_cell(row_idx, used_col_idx, serial)
+                
+                logger.info(f"Выдан серийник {serial} для '{product_name}' (stroka {row_idx}). Extra: {extra_info}")
+                return serial, extra_info
 
-        raise RuntimeError(f"Нет доступных серийников для товара '{product_name}'. Добавь новые в лист 'Товары'.")
+        raise RuntimeError(f"Нет доступных серийников для товара '{product_name}'.")
     
     def get_email_from_pool(self) -> str:
         """Получить свободный email из пула."""
@@ -164,14 +212,12 @@ class AccountService:
             raise RuntimeError("Не указан товар при выдаче аккаунта (product=None).")
 
         email = self.get_email_from_pool()
-        serial = self.get_serial_for_product(product)
+        serial, extra_info = self.get_serial_for_product(product)
 
         all_values = self.sheets.sheet_accounts.get_all_values()
         data_rows = max(0, len(all_values) - 1)
         order_seq = data_rows + 1
         order_no = f"SHKZ{order_seq:03d}"
-
-        row_idx = data_rows + 2
 
         row_idx = data_rows + 2
 
@@ -218,6 +264,7 @@ class AccountService:
             order_no=order_no,
             date=date_receipt,  # Дата для квитанции (в прошлом)
             address_parts=address_parts,  # Чистые компоненты для URL
+            extra_info=extra_info,
         )
     
     def create_account_from_category(

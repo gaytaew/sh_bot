@@ -31,6 +31,8 @@ class AccountData:
     date: str  # Дата для квитанции (в прошлом)
     # Чистые компоненты адреса для URL (если нужны)
     address_parts: Optional[AddressParts] = None
+    # Доп. информация о товаре (Модель, размер, цвет и т.д.)
+    extra_info: Optional[str] = None
 
 
 @dataclass

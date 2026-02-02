@@ -165,6 +165,8 @@ async def handle_product_select(call: types.CallbackQuery):
         account_service.update_receipt_link(account_data.row_idx, final_url, shop_key_for_gs)
 
     # 5. ОТПРАВКА ДАННЫХ АККАУНТА + ССЫЛКА
+    extra_field = f"Модель/Размер: <code>{account_data.extra_info}</code>\n" if account_data.extra_info else ""
+
     text_resp = (
         f"✅ **Аккаунт для Shokz создан:**\n\n"
         f"№ Заказа: <code>{account_data.order_no}</code>\n"
@@ -173,6 +175,7 @@ async def handle_product_select(call: types.CallbackQuery):
         f"Адрес: <code>{account_data.address}</code>\n"
         f"Телефон: <code>{account_data.phone}</code>\n"
         f"Товар: <code>{account_data.product}</code>\n"
+        f"{extra_field}"
         f"Серийник: <code>{account_data.serial}</code>\n"
         "\n**Причина обращения:**\n" + account_data.issue + "\n\n**Ссылки на квитанции:**" + links_text
     )
